@@ -41,6 +41,6 @@ FROM (
 ) tt WHERE grfar>0 AND grmor>0
 GROUP BY grfar, grmor
 HAVING COUNT(DISTINCT dads)>1
-INTO OUTFILE '/tmp/output2.csv' FIELDS TERMINATED BY '\t' LINES TERMINATED BY '\n';
+INTO OUTFILE '/tmp/output.csv' FIELDS TERMINATED BY '\t' LINES TERMINATED BY '\n';
 
 
