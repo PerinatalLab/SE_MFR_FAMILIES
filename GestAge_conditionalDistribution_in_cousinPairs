@@ -1,0 +1,307 @@
+#!/usr/Rscript
+
+#### find all mother-sister pairs and extract GestAge from their pregnancies
+#### draw conditional distributions of GestAge for cousin-children, binning based
+#### on GestAge of one cousin and plotting based on GestAge of other cousin.
+#### Jonas, 2016 Apr 28
+
+
+setwd("~/Dropbox/GIT/SEMFR_GESTAGE_HERITABILITY/METHODS_TO_EVALUATE_HERITABILITY")
+library(dplyr)
+
+#########################################
+################   PHENOTYPE 
+#########################################
+
+#### load the phenotype data from MFR
+dat=read.csv("~/Biostuff/SEMFR_DATA/verena_files/SOS/Death Cancer Patient Birthregistry 150202/mfr150202/mfr_150202_AreaYrMwghMlngSexGABwghCountrParitMageIDs_28Mar2015jb.csv",stringsAsFactors = F)
+
+#############################################
+###########################   PREVIEW DATA
+#############################################
+
+# missingness and the first character
+for (j in 1:ncol(dat)) { 
+        print(colnames(dat)[j])
+        print(table(substr(dat[,j],1,1),useNA="a")) 
+}
+
+#### Gestational Age for each BirthYear
+yrs = sort(unique(dat$AR))
+mnga = ns = NULL
+for (yr in yrs) {
+        gas = dat[which(dat$AR==yr),"GRDBS"]
+        mnga=c(mnga,ifelse(sum(!is.na(gas))>100,mean(gas,na.rm=T),NA))
+        ns = c(ns, sum(!is.na(gas))); rm(gas)
+}
+plot(mnga ~ yrs,ylim = c(min(mnga,na.rm=T),max(mnga,na.rm=T)+1),
+     xlab="Birth year",ylab="Child's Mean Gestational Age at Birth (days)")
+mod = loess(mnga ~ yrs)
+points(predict(mod,data.frame(yrs=yrs)) ~ yrs,type="l")
+ys = rep(max(mnga,na.rm=T)+1,length(yrs))
+text(yrs,ys,round(log(ns,10),0),cex=0.6)
+rm(mnga,mod,ns,yr,yrs,ys)
+
+# NOTE: there is a shift from LMP to ULTRASOUND evaluation of GestAge in year 1985
+# thus the visible decrease in gestational age for time raange 1973-1985
+# possibilities are:  A) exclude everything before 1990;  B) adjust for the year effect
+
+#############################################
+###########################   CLEAN DATA
+#############################################
+
+# check essential data (delete immediately if missing)
+dat = dat[,c("lpnr_BARN","lpnr_mor","KON","GRDBS","PARITET","MALDER","MLANGD","AR")]
+dat = dat[which(dat$lpnr_mor>0),] # since we are interested only in mothers ***
+
+# maternal height (set to missing before deleting later)
+# PROBLEM: MatHgh is only present for years 1982-2012, so 1973-1981 are lost!
+# I will preserve the 1973-1981 data for analyses without adjustments
+dat$MLANGD[which(dat$MLANGD=="")]=NA # maternal height must be present for adjustments
+dat$MLANGD = as.numeric(dat$MLANGD)
+dat$MLANGD[which(dat$MLANGD<145)]=NA # suspicious-height threshold determined by Julius (also, no sib-similarity below this thr)
+dat$MLANGD[which(dat$MLANGD>200)]=NA # almost incredible values
+ix=sample(nrow(dat),1e3,replace=F); plot(dat$MLANGD[ix]~dat$AR[ix]); rm(ix)
+
+# other variables that will be adjusted for (set to missing now, before deleting later)
+dat$MALDER[which((dat$MALDER<13)|(dat$MALDER>50))]=NA
+dat$AR[which(!dat$AR %in% 1973:2012)]=NA
+dat$GRDBS[which((dat$GRDBS<150)|(dat$GRDBS>320))]=NA
+dat$KON[which(!dat$KON %in% 1:2)]=NA
+dat$PARITET[which(!dat$PARITET %in% 1:20)]=NA
+
+
+###
+
+yrs = sort(unique(dat$AR))
+mnga = ns = NULL
+for (yr in yrs) {
+        gas = dat[which(dat$AR==yr),"GRDBS"]
+        mnga=c(mnga,ifelse(sum(!is.na(gas))>100,mean(gas,na.rm=T),NA))
+        ns = c(ns, sum(!is.na(gas))); rm(gas)
+}
+plot(mnga ~ yrs,ylim = c(min(mnga,na.rm=T),max(mnga,na.rm=T)+1),
+     xlab="Birth year",ylab="Child's Mean Gestational Age at Birth (days)")
+mod = loess(mnga ~ yrs,span = 0.3)
+points(predict(mod,data.frame(yrs=yrs)) ~ yrs,type="l")
+ys = rep(max(mnga,na.rm=T)+1,length(yrs))
+text(yrs,ys,round(log(ns,10),0),cex=0.6)
+
+# converter which assigns correction of GestAGe (in days) for each pregnancy 
+new_ga = mod$fitted
+ga_ref = 278 # custom reference
+conv = data.frame(AR=as.numeric(mod$x),ga_correct=ga_ref - new_ga) # corrector
+temp = merge(dat,conv,by="AR",all.y=T)
+dat = temp; dat$GRDBS = temp$GRDBS + temp$ga_correct
+dat = dat[,c("lpnr_mor","MLANGD","AR","KON","GRDBS","MALDER","PARITET")]
+rm(temp,conv,mod,mnga,ns,yr,yrs,ys,new_ga,ga_ref)
+
+
+
+# TWINS/multiplets should be removed first, only then remove covar-missing individuals
+# I will (ambiguously) use the same-YEAR-of delivery as an indicator for MULTIPREG pregnancy
+momYear_code = paste(dat$AR,dat$lpnr_mor,sep="_") # same order as in "dat" !
+multipreg_indic = sort(unique(momYear_code[duplicated(momYear_code)]))
+datMultiPreg = dat[which(momYear_code %in% multipreg_indic),] # save for later use
+dat = dat[which(!momYear_code %in% multipreg_indic),] # clean original data
+rm(momYear_code, multipreg_indic)
+
+no_data_ix = which((is.na(dat$MLANGD))|(is.na(dat$MALDER))|(is.na(dat$PARITET))|
+                            (is.na(dat$AR))|(is.na(dat$GRDBS))|(is.na(dat$KON)))
+datNAs = dat[no_data_ix,] # preserve for future use (non-adjusted analyses)
+datNAs = datNAs[which(!is.na(datNAs$GRDBS)),] # delete when without essential data
+
+# final cleanup of the main dataframe
+dat = dat[-no_data_ix,]
+rm(no_data_ix)
+
+
+
+
+
+################## normalize GestAge based on the MatAge
+##################
+# estimate mean GestAge for each MatAge group
+df = group_by(dat, MALDER) %>% summarise(ga_mean=mean(GRDBS), n=n()) %>% filter(n>20) 
+# fit the model describing relationship
+mod = loess(ga_mean ~ MALDER, df,span = 0.3)
+age_ref = mod$x[which(mod$y==max(mod$y))] # what will we consider a reference MatAge
+ga_ref = mod$fitted[mod$x==age_ref] # reference GestAge at reference MatAge
+plot(df$ga_mean~df$MALDER,xlab="Age group",ylab="Mean GestAge")
+points(predict(mod)~ df$MALDER,type="l",col="red")
+abline(v=age_ref,h=age_ref,lty=2,lwd=0.5)
+
+# converter which assigns correction of GestAge (in days) for each pregnancy 
+new_ga = mod$fitted
+conv = data.frame(MALDER=as.numeric(mod$x),ga_corect=ga_ref - new_ga) # corrector
+temp = merge(dat,conv,by="MALDER",all.y=T)
+dat = temp; dat$GRDBS = temp$GRDBS + temp$ga_corect
+summary(lm(dat$GRDBS ~ dat$MALDER)) # doublecheck
+dat = dat[,c("lpnr_mor","MLANGD","AR","KON","GRDBS","MALDER","PARITET")] # cleanup
+rm(df,temp,conv,age_ref,ga_ref,mod,new_ga)
+
+################## normalize GestAge based on the MatHgh
+##################
+# estimate mean GestAge for each MatAge group
+df = group_by(dat, MLANGD) %>% summarise(ga_mean=mean(GRDBS), n=n()) %>% filter(n>20) 
+# fit the model describing relationship
+mod = loess(ga_mean ~ MLANGD, df,span = 0.9)
+hgh_ref = round(mean(dat$MLANGD),0) # what will we consider a reference MatHgh
+ga_ref = mod$fitted[mod$x==hgh_ref] # reference GestAge at reference MatHgh
+plot(df$ga_mean~df$MLANGD,xlab="MatHgh group",ylab="Mean GestAge")
+points(predict(mod)~ df$MLANGD,type="l",col="red")
+abline(v=hgh_ref,h=ga_ref,lty=2,lwd=0.5)
+
+# converter which assigns correction of GestAge (in days) for each pregnancy 
+new_ga = mod$fitted
+conv = data.frame(MLANGD=as.numeric(mod$x),ga_corect=ga_ref - new_ga) # corrector
+temp = merge(dat,conv,by="MLANGD",all.y=T)
+dat = temp; dat$GRDBS = temp$GRDBS + temp$ga_corect
+summary(lm(dat$GRDBS ~ dat$MLANGD)) # doublecheck
+summary(lm(dat$GRDBS ~ dat$MALDER)) # doublecheck
+dat = dat[,c("GRDBS","lpnr_mor","MLANGD","AR","MALDER","PARITET","KON")] # cleanup
+rm(df,temp,conv,hgh_ref,ga_ref,mod,new_ga)
+
+# adjusting for PARITY might be dangerous as only very healthy mothers do deliver many times,
+# and they do deliver quite late (GA>280) thus it is likely that selction bias is there and
+# adjustment/correction would be harmful
+
+
+
+#########################################
+################   FAMILY STRUCTURE 
+#########################################
+
+fam = read.csv("~/Biostuff/SEMFR_DATA/verena_files/SCB/RTB/verena_lev1_scb_bioforaldrar_MINI-lpnrBarn_FoddArBarn_Kon_lpnrMor_FoddArBioMor_lpnrFar_FoddArBioFar.csv",stringsAsFactors = F)
+#head(fam); dim(fam)
+#range(fam$FoddArBarn)
+#range(fam$FoddArBioMor,na.rm=T)
+#range(fam$FoddArBioFar,na.rm=T)  
+
+###### if you want to make SURE that both parents are biological parents
+#ix = which((!is.na(fam$LopnrBarn))&(!is.na(fam$LopnrMor))&(!is.na(fam$LopnrFar)))
+#fam = fam[ix,]  # you would loose 46k pregnancies
+
+## less stringent: make sure that at least one parent has ID
+ix = which( (!is.na(fam$LopnrBarn))&((!is.na(fam$LopnrMor))|(!is.na(fam$LopnrFar))) )
+fam = fam[ix,]; rm(ix) # you would loose only 4k pregnancies
+
+# remove twins  
+indic = paste(fam$LopnrMor,fam$FoddArBarn,sep="_")  # consider including also "fam$LopnrFar"
+twin_indic = unique(indic[which(duplicated(indic))]) # indicators for twin+ pregnancy
+fam = fam[-which(indic %in% twin_indic),] # removed twin pregnancies
+rm(indic,twin_indic)
+
+# assign family IDs to pregnancies/families
+fam$FID = paste(fam$LopnrMor,fam$LopnrFar,sep="_")
+
+# reduce the dataset
+fam = fam[,c("LopnrBarn","FoddArBarn","Kon","FID")]
+colnames(fam) = c("sibID","sibAR","sibSEX","FID")
+head(fam)
+
+# leave only children who are in MFR as mothers
+fam = fam[which(fam$sibID %in% dat$lpnr_mor),]
+
+# leave only the families with multiple children (sister-mothers)
+tbl = table(fam$FID)
+df = data.frame(nms=names(tbl),cnt=as.numeric(tbl),stringsAsFactors = F); table(df$cnt)
+fam = fam[which(fam$FID %in% df$nms[which(df$cnt>1)]),]; rm(df) # more than one child
+fam = fam[,c("sibID","FID")]
+fam = fam[order(fam$FID),]
+rm(tbl); head(fam)
+
+# leave only mothers who have FID in fam file
+dat = dat[which(dat$lpnr_mor %in% fam$sibID),]
+head(dat)
+
+# merge phenotype and the family data
+m = merge(fam,dat,by.x="sibID",by.y="lpnr_mor",all=F)
+head(m); dim(m)
+
+# leave only one child (first-born preferably) per one sister-mother  
+#m = group_by(m,sibID) %>% top_n(1,desc(PARITET)) %>% ungroup()
+
+### SELECT ALL POSSIBLE PAIRS OF OFFSPRINGS OF SISTER-MOTHERS:   LARGE but BIASED ***
+m$rndrank = sample(nrow(m),nrow(m),replace=F) # for unbiased pairing *** NOT YET FULLY SOLVED
+gr1 = inner_join(m,m,by="FID") %>% filter(sibID.x < sibID.y)  %>% filter(rndrank.x < rndrank.y)
+gr1=gr1[c("FID","sibID.x","sibID.y","GRDBS.x","GRDBS.y","MALDER.x","MALDER.y","AR.x","AR.y",
+          "MLANGD.x","MLANGD.y","PARITET.x","PARITET.y","KON.x","KON.y")]
+head(gr1)
+
+
+## SCAVANGE ROUND 1
+#m$rndrank = sample(nrow(m),nrow(m),replace=F) # for unbiased pairing (3 rows below)
+#gr1 = group_by(m,FID) %>% top_n(2,desc(PARITET)) %>% ungroup() #gr1 = gr1[order(gr1$FID),]
+#gr1 = inner_join(gr1,gr1,by="FID") %>% filter(rndrank.x < rndrank.y) # group them by FID
+#gr1=gr1[c("FID","sibID.x","sibID.y","GRDBS.x","GRDBS.y","MALDER.x","MALDER.y","AR.x","AR.y",
+#          "MLANGD.x","MLANGD.y","PARITET.x","PARITET.y","KON.x","KON.y")]
+
+## SCAVANGE ROUND 2
+#used_IDs = unique(c(gr1$sibID.x,gr1$sibID.y))
+#m = m[which(!m$sibID %in% used_IDs),]
+#gr2 = group_by(m,FID) %>% top_n(2,desc(PARITET)) %>% ungroup()
+#gr2 = inner_join(gr2,gr2,by="FID") %>% filter(rndrank.x < rndrank.y)
+#gr2=gr2[c("FID","sibID.x","sibID.y","GRDBS.x","GRDBS.y","MALDER.x","MALDER.y","AR.x","AR.y",
+#          "MLANGD.x","MLANGD.y","PARITET.x","PARITET.y","KON.x","KON.y")]
+
+## ROUND 3
+#used_IDs = unique(c(gr2$sibID.x,gr2$sibID.y))
+#m = m[which(!m$sibID %in% used_IDs),]
+#gr3 = group_by(m,FID) %>% top_n(2,desc(PARITET)) %>% ungroup()
+#gr3 = inner_join(gr3,gr3,by="FID") %>% filter(rndrank.x < rndrank.y)
+
+## COMBINE
+#grs = rbind(gr1,gr2) #,gr3)
+grs = gr1
+gaY=data.frame(phe1=grs$GRDBS.x,phe2=grs$GRDBS.y,stringsAsFactors = F)
+head(gaY)
+
+##########################################
+dim(gaY)
+cor(gaY)
+
+#save(file="all_nonTwinMotherSisters_withMAgeMHghAdjustedGestAge_n56009.RData",list=c("gaY"))
+
+
+
+############################################  METHOD
+
+gaY$phe1_bin = gaY$phe1 %/% 7 * 7
+tbl = table(gaY$phe1_bin)
+phe_bins = sort(as.numeric(names(tbl[tbl>100])))
+rez = QUANTs = NULL
+for (phe in phe_bins) {
+        #if ( (phe>=168)&(phe<=301)) {  
+                tmp = gaY[which(gaY$phe1_bin==phe),]
+                quants = t(matrix(quantile(tmp$phe2,probs=seq(from=0.025,to=0.975,by=0.05))))
+                QUANTs = rbind(QUANTs,quants)
+                rez = rbind(rez,data.frame(phe=phe,N=length(tmp$phe2),
+                                           MeanPHE = mean(tmp$phe2),stringsAsFactors = F))
+        #}
+}
+rez 
+QUANTs
+
+library(RColorBrewer)
+#display.brewer.all()  #display.brewer.pal(5,"YlOrRd")
+plot(NA,xlim = range(rez$phe),ylim =range(QUANTs), main="Conditional Distribution of GestAge",
+     xlab="GestationalAge bins for SibMom1",ylab="GestAge percentiles for SibMom2")
+cols = brewer.pal(ncol(QUANTs)/2, "RdYlBu") # "Spectral"
+for (j in 1:floor((ncol(QUANTs)/2))) {
+        polygon(y = c(QUANTs[,j],rev(QUANTs[,ncol(QUANTs)-(j-1)]),QUANTs[1,j]),
+                x = c(rez$phe,rev(rez$phe),rez$phe[1]),col=cols[j],border = F)
+} 
+points(rez$MeanPHE ~ rez$phe,pch  = 19,type="l",col="white",lty=2,lwd=2)
+
+#####  test for quantile slope differences (interaction)
+ps = NULL
+for (j in 1:20) {
+y = c(QUANTs[,11],QUANTs[,j])
+f = c(rep(1,nrow(QUANTs)),rep(2,nrow(QUANTs)))
+x = c(rez$MeanPHE,rez$MeanPHE)
+cfs = coef(summary(lm(y ~ x*f)))
+ps = c(ps, cfs[4,4])
+#plot(y ~ x,col=f,pch = 19)
+}
+ps
