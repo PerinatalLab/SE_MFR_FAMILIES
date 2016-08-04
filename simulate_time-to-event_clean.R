@@ -149,6 +149,23 @@ getSurvivals = function(EffectsT, lambda){
         return(SurvivalTimes)
 }
 
+############ simulate unrelated individuals
+
+simulateWithEffect = function(SnpTable){
+        SnpMatrix = snpTableToMatrix(SnpTable)
+        BetaMatrix = snpMatrixToBetas(SnpMatrix, maxTime)
+        
+        GenomeMatrix = generateGenome(inds, SnpMatrix$maf)
+        
+        EffectsE = alpha * 1:(maxTime-150)
+        EffectsG = calculateEffectsG(GenomeMatrix, BetaMatrix)
+        EffectsT = sumEffects(EffectsG, EffectsE)
+        survTimes = getSurvivals(EffectsT, lambda)
+        
+        return(data.frame(GA=survTimes)+150)
+}
+
+
 ############ simulate sibs
 
 simulateWithEffectSibs = function(SnpTable){
@@ -219,10 +236,11 @@ fitModelSibs = function(SnpTable){
         return(cost)
 }
 
-
 ## usage:
 SnpTable = data.frame(name=c("filler", "fixed", "varying"), effect=c(0, 1, 0),
                       spread=c(1, 1, 10), number=c(1, 6, 1),
                       maf=c(0.5, 0.5, 0.5), time=c(50, 250-150, 250-150),
                       type=c("uniform", "uniform", "normal"))
 fitModelSibs(SnpTable)
+
+simulateWithEffect(SnpTable)
