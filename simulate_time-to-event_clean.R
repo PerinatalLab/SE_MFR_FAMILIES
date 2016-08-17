@@ -14,9 +14,9 @@ theme_update(panel.grid.major=element_line(size=0.5, color="grey", linetype="das
 ## after introducing mutations with different effects, timing and so on.
 ##                                              --- Julius, 2016-04-18
 
+## converts a table with numbers of SNPs of different classes
+## and output a matrix with the effects of individual SNPs
 snpTableToMatrix = function(SnpTable){
-        ## converts a table with numbers of SNPs of different classes
-        ## and output a matrix with the effects of individual SNPs
         SnpMatrix = data.frame(name = rep(SnpTable$name, SnpTable$number),
                                effect = rep(SnpTable$effect, SnpTable$number),
                                spread = rep(SnpTable$spread, SnpTable$number),
@@ -27,9 +27,8 @@ snpTableToMatrix = function(SnpTable){
         return(SnpMatrix)
 }
 
+## generates beta coefficients (effect sizes) for each genomic position and time point
 snpMatrixToBetas = function(SnpMatrix, maxTime){
-        ## generates beta coefficients (effect sizes) for each genomic position and time point
-
         BetaMatrix = matrix(0, nrow=nrow(SnpMatrix), ncol=maxTime-150)
         for(s in 1:nrow(SnpMatrix)){
                 type = SnpMatrix$type[s]
@@ -55,6 +54,8 @@ snpMatrixToBetas = function(SnpMatrix, maxTime){
         return(BetaMatrix)        
 }
 
+
+## generates a matrix of genotypes based on MAFs
 cppFunction("arma::mat generateGenome(int inds, arma::vec maf){
         arma::mat out = arma::randu(inds, maf.size());
             
@@ -72,6 +73,7 @@ cppFunction("arma::mat generateGenome(int inds, arma::vec maf){
        return(out);
 }", depends="RcppArmadillo")
 
+## generates a matrix of genotypes based on MAFs and first sib's genotype
 cppFunction("arma::mat generateSibGenome(arma::mat genome, arma::vec maf){
         arma::mat out = arma::randu(genome.n_rows, maf.size());
             
@@ -107,13 +109,14 @@ cppFunction("arma::mat generateSibGenome(arma::mat genome, arma::vec maf){
         return(out);
 }", depends="RcppArmadillo")
 
+## takes SNP dosages for each individual and a matrix of betas for each SNP and TIME
+## and multiplies them to get a matrix of INDxTIME
 calculateEffectsG = function(GenomeMatrix, BetaMatrix){
-        ## takes SNP dosages for each individual and a matrix of betas for each SNP and TIME
-        ## and multiplies them to get a matrix of INDxTIME
         EffectsG = GenomeMatrix %*% as.matrix(BetaMatrix)
 
         return(EffectsG)
 }
+
 
 ## produces environmental effects for each day
 ## based on Gompertz distribution
@@ -125,14 +128,16 @@ cppFunction('arma::mat sumEffects(arma::mat genome, arma::vec env){
         return(genome);
 }', depends="RcppArmadillo")
 
+
 ## a bit faster call to exp()
 cppFunction('arma::vec exp_own(arma::vec min){
         return(exp(min));
 }', depends="RcppArmadillo")
 
+
+## takes the known effects and introduces stochasticity
+## i.e. tests the e^hazards against Unif(0,1)
 getSurvivals = function(EffectsT, lambda){
-        ## takes the known effects and introduces stochasticity
-        ## i.e. tests the e^hazards against Unif(0,1)
         risk = 1:nrow(EffectsT)
         time = 1
         SurvivalTimes = rep(ncol(EffectsT), length(risk))
@@ -149,8 +154,7 @@ getSurvivals = function(EffectsT, lambda){
         return(SurvivalTimes)
 }
 
-############ simulate unrelated individuals
-
+## simulate the genotypes of unrelated individuals
 simulateWithEffect = function(SnpTable){
         SnpMatrix = snpTableToMatrix(SnpTable)
         BetaMatrix = snpMatrixToBetas(SnpMatrix, maxTime)
@@ -165,9 +169,7 @@ simulateWithEffect = function(SnpTable){
         return(data.frame(GA=survTimes)+150)
 }
 
-
-############ simulate sibs
-
+## simulate the genotypes of sib pairs
 simulateWithEffectSibs = function(SnpTable){
         SnpMatrix = snpTableToMatrix(SnpTable)
         BetaMatrix = snpMatrixToBetas(SnpMatrix, maxTime)
@@ -186,8 +188,9 @@ simulateWithEffectSibs = function(SnpTable){
         return(data.frame(GA.x=survTimes, GA.y=survTimes2)+150)
 }
 
+
+## calculates whatever quantiles are needed for the heritability estimation
 calculateQuantiles = function(SurvTimes){
-        ## calculates whatever quantiles are needed for the heritability estimation
         SurvSummary = mutate(SurvTimes, ga1_bin = GA.x %/% 7 * 7) %>%
                 filter(ga1_bin>=230, ga1_bin<=290) %>%
                 group_by(ga1_bin) %>%
@@ -207,6 +210,7 @@ lambda = exp(-18.395) ## using 150 d cutoff, adjusted MFR. otherwise 6.05e-18
 
 ### set path to the quantiles calculated from observed data
 RealSummary = read.table()
+
 
 ###############
 ## this launcher is to be used for automatic optimization
@@ -235,6 +239,7 @@ fitModelSibs = function(SnpTable){
         
         return(cost)
 }
+
 
 ## usage:
 SnpTable = data.frame(name=c("filler", "fixed", "varying"), effect=c(0, 1, 0),
