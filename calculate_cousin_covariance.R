@@ -82,10 +82,11 @@ cov(cousins_mean2$GA.x, cousins_mean2$GA.y)/var(c(cousins_mean2$GA.x, cousins_me
 mfrc = filter(mfr, PARITET>0, ROK1>0, MHEIGHT>143, MWEIGHT>40 & MWEIGHT<150)
 mfrc$MFODLAND_cat = mfrc$MFODLAND!="SVERIGE"
 mfrc$FAMSIT_cat = mfrc$FAMSIT!=1
-mfrc$MAGE_cat = cut(mfrc$MAGE, breaks=c(0,20, 25, 30, 35, 100), labels = c(2, 1, 3, 4, 5))
+mfrc$MAGE_cat = cut(mfrc$MAGE, breaks=c(0,20, 25, 30, 35, 100), labels = 1:5)
+mfrc$MAGE_cat = factor(mfrc$MAGE_cat, levels = c(2,1,3,4,5))
 mfrc$PARITET[mfrc$PARITET>4] = 4
 
-lm_formula = as.formula("GA ~ factor(PARITET) + KON + MHEIGHT + YEAR + MWEIGHT + FAMSIT_cat + factor(MAGE_cat) + MFODLAND_cat + factor(ROK1)")
+lm_formula = as.formula("GA ~ factor(PARITET) + KON + MHEIGHT + YEAR + MWEIGHT + FAMSIT_cat + MAGE_cat + MFODLAND_cat + factor(ROK1)")
 
 summary(lm(lm_formula, data=mfrc))
 
@@ -112,10 +113,16 @@ cousins_mean4 = cousins_mean4[!duplicated(cousins_mean4$fid),]
 cov(cousins_mean4$GA.x, cousins_mean4$GA.y) ## = 1/8 V_F + 1/2 V_M; V_M = 0.2160
 cov(cousins_mean4$GA.x, cousins_mean4$GA.y)/var(c(cousins_mean4$GA.x, cousins_mean4$GA.y))*8/5
 
-cousins_mean_sum = summarizeWindow(cousins_mean, 7)
-cousins_mean_sum2 = summarizeWindow(cousins_mean2, 7)
-cousins_mean_sum3 = summarizeWindow(cousins_mean3, 7)
-cousins_mean_sum4 = summarizeWindow(cousins_mean4, 7)
+cousins_mean_sum = calculateQuantiles(cousins_mean)
+cousins_mean_sum2 = calculateQuantiles(cousins_mean2)
+cousins_mean_sum3 = calculateQuantiles(cousins_mean3)
+cousins_mean_sum4 = calculateQuantiles(cousins_mean4)
+write.table(cousins_mean_sum, "~/Documents/swed_mfr_games/simulations_local/finalrez/cousins_mean_sum.csv", quote = F, row.names = F, col.names = T)
+write.table(cousins_mean_sum2, "~/Documents/swed_mfr_games/simulations_local/finalrez/cousins_mean_sum2.csv", quote = F, row.names = F, col.names = T)
+write.table(cousins_mean_sum3, "~/Documents/swed_mfr_games/simulations_local/finalrez/cousins_mean_sum3.csv", quote = F, row.names = F, col.names = T)
+write.table(cousins_mean_sum4, "~/Documents/swed_mfr_games/simulations_local/finalrez/cousins_mean_sum4.csv", quote = F, row.names = F, col.names = T)
+write.table(tidy(lmfit), "~/Documents/swed_mfr_games/simulations_local/finalrez/mfr_fit.csv", quote = F, row.names = F, col.names = T)
+
 p1 = ggplot(cousins_mean_sum, aes(x=GA_gr)) + theme(panel.grid.major = element_line(linetype="dashed", color="grey50", size=0.5)) +
         geom_ribbon(aes(ymax=-ci_upp, ymin=-ci_low), fill="grey70", alpha=0.4) + coord_cartesian(ylim=c(-50, 4000)) +
         geom_line(aes(y=-c), col="black") + ylab("-covariance")
@@ -311,3 +318,19 @@ out$trueGA = quantile(c(cousins_mean2$GA.x, cousins_mean2$GA.y), out$GA_gr/100)
 ggplot(out, aes(x=GA_gr, group=model)) + geom_line(aes(y=cmean, color=model)) +
         geom_ribbon(aes(ymax=q10, ymin=q90, fill=model), alpha=0.2)
 
+library(flexsurv)
+mfr_gomp = mfr_fit
+mfr_gomp_nocous = anti_join(mfr_gomp, cousins_mean4, by=c("id_barn"="kid1.x")) %>% anti_join(cousins_mean4, by=c("id_barn"="kid1.y"))
+mfr_gomp_nocous$GA = mfr_gomp_nocous$GA-150
+mfr_gomp_nocous$event = TRUE
+gompfit = flexsurvreg(Surv(GA, event) ~ 1, data = mfr_gomp_nocous, dist = "gompertz")
+gompfit$coefficients
+gompfit$AIC
+
+gompfit = flexsurvreg(Surv(GA, event) ~ 1, data = mfr_gomp_nocous, dist = "weibull")
+gompfit$coefficients
+gompfit$AIC
+
+gompfit = flexsurvreg(Surv(GA, event) ~ 1, data = mfr_gomp_nocous, dist = "exp")
+gompfit$coefficients
+gompfit$AIC
