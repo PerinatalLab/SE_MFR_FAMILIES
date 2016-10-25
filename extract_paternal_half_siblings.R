@@ -178,6 +178,7 @@ sum((data_check$dad_first - data_check$data_hs)!=0) # fathers shouls be alwasy t
 sum((data_check$mom_first - data_check$mom_hs)==0) # mothers should always be different, thus the sum must be equal to 0
 
 
+
 # check if there are repeated pairs
 
 
